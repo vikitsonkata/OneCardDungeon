@@ -1,6 +1,8 @@
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <iostream>
+#include <thread>
 
 int rng(int range)
 {
@@ -14,14 +16,50 @@ int rollDie(int sides = 6)
     return rng(sides) + 1;
 }
 
-template<class T>
-void log(T message, std::string divider = "\n")
+enum class colorCode
 {
-    std::cout << message << divider;
+    black = 0,
+    red,
+    green,
+    yellow,
+    blue,
+    magenta,
+    cyan,
+    white,
+    normal = 9
+};
+
+constexpr int DELAY = 100;
+void wait(int delayTime)
+{
+    std::this_thread::sleep_for(std::chrono::milliseconds(delayTime));
 }
-void log(std::string message = "", std::string divider = "\n")
+template<class T>
+void log(T message, std::string divider = "\n",
+         colorCode fontColor = colorCode::black,
+         colorCode backgroudColor = colorCode::normal,
+         int delayTime = DELAY)
 {
-    log<std::string>(message, divider);
+    std::cout
+        << "\e[3" + std::to_string(int(fontColor)) + "m"
+              << "\e[10" + std::to_string(int(backgroudColor)) + "m"
+              << message << divider << "\e[49m";
+    wait(delayTime);
+}
+template<class T>
+void log(T message, colorCode fontColor)
+{
+    std::cout << "\e[3" + std::to_string(int(fontColor)) + "m"
+              << message << "\n\e[49m";
+}
+void log(std::string message = "", std::string divider = "\n",
+         colorCode fontColor = colorCode::black)
+{
+    log<std::string>(message, divider, fontColor);
+}
+void clearScrean()
+{
+    log("\x1b[2J\x1b[H");
 }
 
 enum class cell
@@ -69,9 +107,9 @@ struct coord
         coord radius(to - coord(x, y));
         return sqrt(radius.x*radius.x + radius.y*radius.y);
     }
-    bool isAdjacent(coord to)
+    bool isAdjacent(coord to, int atthackRange = 2)
     {
-        return distance(to) < 1.5;
+        return distance(to) <= 0.5 * atthackRange;
     }
 
     coord operator+ (const coord& other) const
@@ -131,7 +169,7 @@ public:
     {
         return grid.at(pos.y).at(pos.x) == cell::empty;
     }
-    void Print()
+    void Print(colorCode color = colorCode::normal) const
     {
         std::stringstream ss;
         for(auto &row : grid)
@@ -142,15 +180,18 @@ public:
             }
             ss << "|\n";
         }
-        log(ss.str());
+        log(ss.str(), color);
     }
-    void Move(coord from, coord to)
+    bool Move(coord from, coord to)
     {
-//        log("from ");
-//        log<coord>(from);
-//        log("to ");
-//        log<coord>(to);
-        std::swap(grid.at(from.y).at(from.x), grid.at(to.y).at(to.x));
+        if(to.x >= 0 && to.x < MAX_ROW &&
+            to.y >= 0 && to.y < MAX_COL)
+        {
+            std::swap(grid.at(from.y).at(from.x),
+                      grid.at(to.y).at(to.x));
+            return true;
+        }
+        return false;
     }
 
 private:
@@ -167,7 +208,7 @@ struct Stats
     int defence;
     int range;
 
-    Stats(int hp = 6, int mov = 1, int att = 1, int def = 1, int ran = 2)
+    Stats(int hp = 6, int mov = 1, int att = 1, int def = 1, int ran = 6)
     {
         health = hp;
         move = mov;
@@ -175,7 +216,7 @@ struct Stats
         defence = def;
         range = ran;
     }
-    void PrintHP()
+    void PrintHP()  const
     {
         log("HP:", " ");
         log(health);
@@ -207,7 +248,7 @@ public:
     {
         this->pos = pos;
     }
-    coord GetPos()
+    coord GetPos() const
     {
         return pos;
     }
@@ -215,9 +256,13 @@ public:
     {
         stats = newStat;
     }
-    Stats GetStats()
+    Stats GetStats() const
     {
         return stats;
+    }
+    const std::string& GetName() const
+    {
+        return name;
     }
     void Move(direction d)
     {
@@ -257,16 +302,27 @@ public:
     }
     void Defend(int attackDamage)
     {
-        stats.health -= attackDamage/stats.defence;
-        if(stats.health <= 0)
-            log(name+" is dead");
+        int damage = attackDamage/stats.defence;
+        stats.health -= damage;
+        switch (damage) {
+        case 0:
+            log(") Defended (", colorCode::yellow);
+            break;
+        case 1:
+            log("> Damaged <", colorCode::blue);
+            break;
+        case 2:
+            log(">> Smashed <<", colorCode::blue);
+            break;
+        default:
+            if(stats.health <= 0)
+                log("## " + name+" is dead ##", colorCode::red);
+            else
+                log("** Lethaly wounded **", colorCode::red);
+            break;
+        }
     }
-    const std::string& GetName()
-    {
-        return name;
-    }
-
-    void Print()
+    void Print() const
     {
         log(name);
         log<Stats>(stats);
@@ -294,50 +350,91 @@ public:
 
             coord step = to - pos;
 
+            // adjacent
             if(step.distance() <= stats.range * 0.5)
             {
-                // it adjacent
-                return;
+                // line of sight
+                bool sight = true;
+                if(step.x == 0)
+                {
+                    for(int i = 0; i < step.y; i++)
+                    {
+                        if(!field.isFree({pos.x, pos.y+i}))
+                        {
+                            sight = false;
+                        }
+                    }
+                }
+                if(step.y == 0)
+                {
+                    for(int i = 0; i < step.x; i++)
+                    {
+                        if(!field.isFree({pos.x+i, pos.y}))
+                        {
+                            sight = false;
+                        }
+                    }
+                }
+                if(step.x == step.y)
+                {
+                    for(int i = 0; i < step.x; i++)
+                    {
+                        if(!field.isFree({pos.x+i, pos.y+i}))
+                        {
+                            sight = false;
+                        }
+                    }
+                }
+                if(sight) return;
             }
 
             if(step.x != 0 && step.y != 0
                 && speed > 2 && field.isFree(pos + step.direction()))
             {
-                log("monster move diagonal");
+                log("\tMonster move diagonal");
                 pos += step.direction();
                 step -= step.direction();
                 speed -= 3;
             }
             else if((step.x != 0 || step.y != 0))
             {
-                //                log("monster move ortogonal");
                 //priority horizontal movement
                 if(step.x != 0 && field.isFree(pos + coord(step.direction().x, 0)))
                 {
-                    log("monster move horizontal");
+                    log("\tMonster move horizontal");
                     pos.x += step.direction().x;
                     step.x -= step.direction().x;
                     speed -= 2;
                 }
                 else if(step.y != 0 && field.isFree(pos + coord(0, step.direction().y)) && speed > 1)
                 {
-                    log("monster move vertical");
+                    log("\tMonster move vertical");
                     pos.y += step.direction().y;
                     step.y -= step.direction().y;
                     speed -= 2;
                 }
                 else
                 {
-                    log("monster don't know");
+                    log("\tMonster don't know");
+                    if(step.x > step.y)
+                        step.y = 0;
+                    else
+                        step.x = 0;
+
+                    int random = rng(2);
+                    if(random)
+                    {
+
+                    }
                     return;
                 }
             }
             else
             {
-                log("monster don't move");
+                log("\tMonster don't move");
                 return;
             }
-            log(name, " ");
+            log("\t" + name + " is at ", " ");
             log(pos);
         }
     }
@@ -352,6 +449,12 @@ public:
 //        baseStats = Stats(6, 1, 1, 1, 2);
     }
 
+    void ResetStatsToBase()
+    {
+        int currHP = stats.health;
+        stats = baseStats;
+        stats.health = currHP;
+    }
     void RollDice(int count = 3)
     {
         std::vector<int> dies;
@@ -360,31 +463,37 @@ public:
             dies.push_back(rollDie());
         }
 
-        log("RNG : ");
+        ResetStatsToBase();
+        PrintStats();
         for(auto &die : dies)
         {
             log(die, " ");
         }
-        stats = baseStats;
-        PrintStats();
+        log("\t: RNG");
 
         for(int i = 0; i < count; i++)
         {
-            log("Set " + std::to_string(i+1) +" die to (1-3):", " ");
-            int choice;
+            log("Set " + std::to_string(i+1) +" die to S/A/D - Speed/Attack/Defence:", " ");
+            char choice;
             std::cin >> choice;
             switch (choice) {
-            case 1:
+            case '1':
+            case 'S':
+            case 's':
                 stats.move = baseStats.move + dies.at(i);
                 break;
-            case 2:
+            case '2':
+            case 'A':
+            case 'a':
                 stats.attack = baseStats.attack + dies.at(i);
                 break;
-            case 3:
+            case '3':
+            case 'D':
+            case 'd':
                 stats.defence = baseStats.defence + dies.at(i);
                 break;
             default:
-                log("wrong number, AUTO set");
+                log("\t ... invalid, AUTO set");
                 stats.move = baseStats.move + dies.at(0);
                 stats.attack = baseStats.attack + dies.at(1);
                 stats.defence = baseStats.defence + dies.at(2);
@@ -452,26 +561,32 @@ public:
                 stats.move -= 3;
                 break;
             default:
+
                 return;
             }
-            f.Move(posBegin, pos);
+            if(!f.Move(posBegin, pos))
+            {
+                pos = posBegin;
+                log("... out of map, sorry");
+            }
             f.Print();
         }
     }
 
-    void Attack(std::vector<Monster>& enemies)
+    void Attack(std::vector<Monster>& enemies, Field& field)
     {
-        log("Hero Attack!");
-        std::vector<Monster> closeMonsters;
+        log("Hero Attack!", colorCode::cyan);
+        std::vector<Monster*> closeMonsters;
         for(auto& monster : enemies)
         {
-            if(monster.GetPos().distance(pos) <= stats.range * 0.5)
+            if(monster.GetPos().isAdjacent(pos, stats.range))
             {
-                log(monster.GetName() + " HP: " + std::to_string(monster.GetStats().health));
-                closeMonsters.push_back(monster); // todo: copy of the monster, set original!
+                log(monster.GetName(), "", colorCode::red);
+                log(" HP: " + std::to_string(monster.GetStats().health));
+                closeMonsters.push_back(&monster);
             }
         }
-        std::vector<Monster>::iterator attacked;
+        Monster* attacked;
         if(closeMonsters.size() > 1)
         {
             log("Choose monster to attack (0,1,..)");
@@ -479,27 +594,34 @@ public:
             std::cin >> num;
             if(num < closeMonsters.size())
             {
-                attacked = std::next(closeMonsters.begin(), num);
+                attacked = closeMonsters.at(num);
             }
             else
             {
-                attacked = closeMonsters.begin();
+                attacked = closeMonsters.front();
             }
         }
         else if(closeMonsters.size() == 1)
         {
-            attacked = closeMonsters.begin();
+            attacked = closeMonsters.front();
         }
         else
         {
+            log("... nothing");
             return;
         }
 
         attacked->Defend(stats.attack);
         if(attacked->GetStats().health <= 0)
         {
-            log(name+" is dead");
-            enemies.erase(attacked);
+            for(int i = 0; i < enemies.size(); i++)
+            {
+                if(&enemies.at(i) == attacked)
+                {
+                    field.SetCell(enemies.at(i).GetPos(), cell::empty);
+                    enemies.erase(enemies.begin() + i);
+                }
+            }
         }
         else
         {
@@ -507,7 +629,7 @@ public:
         }
 
     }
-    void PrintStats()
+    void PrintStats() const
     {
         log("Your stats: ");
         log(stats.move, " ");
@@ -524,7 +646,8 @@ class Level
 public:
     Level(int number): id(number)
     {
-        log("LEVEL " + std::to_string(number));
+        log("LEVEL " + std::to_string(number), colorCode::green);
+        color = colorCode(id);
 
         coord begin(0, MAX_ROW-1);
         hero.SetPosition(begin);
@@ -532,44 +655,45 @@ public:
         hero.Print();
     }
 
-    int id;
-    Field field;
-    Hero hero;
-    std::vector<Monster> enemies;
-
-
     void HeroTurn()
     {
-        log("Hero turn!");
+        log("Hero turn!", colorCode::cyan);
         log("HP: " + std::to_string(hero.GetStats().health));
         hero.RollDice();
         hero.Move(field);
-        hero.Attack(enemies);
+        hero.Attack(enemies, field);
     }
-    void EnemiesTurn()
+    bool EnemiesTurn()
     {
         log();
-        log("Enemies turn!");
+        log("Enemies turn!", colorCode::red);
         for(auto &i : enemies)
         {
             coord pos = i.GetPos();
             i.Move(hero.GetPos(), field);
             field.Move(pos, i.GetPos());
         }
-        int attack = 0;
-        for(auto &i : enemies)
+        int attackDamage = 0;
+        for(auto &monster : enemies)
         {
-            if(i.GetPos().isAdjacent(hero.GetPos()))
+            if(monster.GetPos().isAdjacent(hero.GetPos(), monster.GetStats().range))
             {
-                attack += i.GetStats().attack;
+                attackDamage += monster.GetStats().attack;
+                log(monster.GetName() + " attack");
             }
         }
-        hero.Defend(attack);
-
-        for(auto &i : enemies)
+        if(attackDamage)
         {
-            i.Print();
+            log("Enemies attack is " + std::to_string(attackDamage), colorCode::red);
+            log("Hero defends is " + std::to_string(hero.GetStats().defence));
+            hero.Defend(attackDamage);
         }
+        if(hero.GetStats().health <= 0)
+        {
+            log("Game over!", colorCode::magenta);
+            return true;
+        }
+        return false;
     }
 
     void AddWall(coord pos)
@@ -581,22 +705,79 @@ public:
         field.SetCell(pos, cell::enemy);
         enemies.push_back(Monster(name, stats, pos));
     }
+    void PrintEnemies() const
+    {
+        for(auto &i : enemies)
+        {
+            i.Print();
+        }
+    }
+    bool isClear() const
+    {
+        if(enemies.empty())
+        {
+            log("^^ You WIN! ^^", colorCode::green);
+            return true;
+        }
+        return false;
+    }
+
+    const Field& GetField() {return field;}
+    const Hero& GetHero() {return hero;}
+    colorCode GetColor() {return color;}
+
+private:
+    int id;
+    colorCode color;
+    Field field;
+    Hero hero;
+    std::vector<Monster> enemies;
+
 };
 
 int main() {
 
-    Level level1(1);
-    level1.AddWall({1, 1});
-    level1.AddWall({3, 3});
-    level1.AddWall({3, 1});
-    level1.AddEnemy("Spider1", {2, 4, 4, 4, 2}, {3, 0});
-    level1.AddEnemy("Spider2", {2, 4, 4, 4, 2}, {4, 3});
+    std::vector<Level> levels;
+    levels.push_back(Level(1));
+    levels.back().AddWall({1, 1});
+    levels.back().AddWall({3, 3});
+    levels.back().AddWall({3, 1});
+    levels.back().AddEnemy("Spider1", {2, 4, 4, 4, 2}, {3, 0});
+    levels.back().AddEnemy("Spider2", {2, 4, 4, 4, 2}, {4, 3});
 
-    while(level1.hero.GetStats().health > 0)
+    levels.push_back(Level(2));
+    levels.back().AddWall({1, 1});
+    levels.back().AddWall({3, 3});
+    levels.back().AddWall({1, 3});
+    levels.back().AddEnemy("Skelet1", {3, 3, 5, 4, 4}, {3, 0});
+
+
+    auto currLevel = levels.begin();
+    while(currLevel->GetHero().GetStats().health > 0)
     {
-        level1.field.Print();
-        level1.HeroTurn();
-        level1.EnemiesTurn();
+        currLevel->GetField().Print(currLevel->GetColor());
+        currLevel->PrintEnemies();
+        currLevel->HeroTurn();
+        if(currLevel->isClear())
+        {
+            if(currLevel != levels.end())
+            {
+                currLevel = std::next(currLevel);
+            }
+            else
+            {
+                log("...", colorCode::green);
+                log("...", colorCode::green);
+                log("... THE END", colorCode::green);
+            }
+        }
+        if(currLevel->EnemiesTurn())
+        {
+            log(".. You lost! ..", colorCode::red);
+            break;
+        }
+        wait(20*DELAY);
+        clearScrean();
     }
 
     return 0;
