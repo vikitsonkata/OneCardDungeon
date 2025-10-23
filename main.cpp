@@ -208,7 +208,7 @@ struct Stats
     int defence;
     int range;
 
-    Stats(int hp = 6, int mov = 1, int att = 1, int def = 1, int ran = 6)
+    Stats(int hp = 6, int mov = 1, int att = 1, int def = 1, int ran = 2)
     {
         health = hp;
         move = mov;
@@ -255,6 +255,27 @@ public:
     void SetStats(Stats newStat)
     {
         stats = newStat;
+    }
+    void Buff(char type)
+    {
+        switch (type) {
+        case 'm':
+            stats.move++;
+            break;
+        case 'a':
+            stats.attack++;
+            break;
+        case 'd':
+            stats.defence++;
+            break;
+        case 'r':
+            stats.range++;
+            break;
+        case 'h':
+        default:
+            stats.health = 6;
+            break;
+        }
     }
     Stats GetStats() const
     {
@@ -644,14 +665,15 @@ private:
 class Level
 {
 public:
-    Level(int number): id(number)
+    Level(Hero& myHero, int number): id(number)
     {
         log("LEVEL " + std::to_string(number), colorCode::green);
         color = colorCode(id);
 
         coord begin(0, MAX_ROW-1);
-        hero.SetPosition(begin);
         field.SetCell(begin, cell::hero);
+        hero = myHero;
+        hero.SetPosition(begin);
         hero.Print();
     }
 
@@ -723,7 +745,7 @@ public:
     }
 
     const Field& GetField() {return field;}
-    const Hero& GetHero() {return hero;}
+    Hero& GetHero() {return hero;}
     colorCode GetColor() {return color;}
 
 private:
@@ -737,20 +759,36 @@ private:
 
 int main() {
 
+    Hero adventurer("Viktor");
+    adventurer.Buff('r');
+    adventurer.Buff('r');
+    adventurer.Buff('r');
     std::vector<Level> levels;
-    levels.push_back(Level(1));
+    levels.push_back(Level(adventurer, 1));
     levels.back().AddWall({1, 1});
     levels.back().AddWall({3, 3});
     levels.back().AddWall({3, 1});
-    levels.back().AddEnemy("Spider1", {2, 4, 4, 4, 2}, {3, 0});
-    levels.back().AddEnemy("Spider2", {2, 4, 4, 4, 2}, {4, 3});
+    levels.back().AddEnemy("Spider 1", {2, 4, 4, 4, 2}, {3, 0});
+    levels.back().AddEnemy("Spider 2", {2, 4, 4, 4, 2}, {4, 3});
 
-    levels.push_back(Level(2));
+    levels.push_back(Level(adventurer, 2));
+    levels.back().AddWall({3, 1});
+    levels.back().AddWall({3, 2});
+    levels.back().AddWall({0, 2});
+    levels.back().AddEnemy("Skelet archer 1", {3, 4, 5, 4, 4}, {4, 3});
+    levels.back().AddEnemy("Skelet archer 2", {3, 4, 5, 4, 4}, {1, 0});
+
+    levels.push_back(Level(adventurer, 3));
     levels.back().AddWall({1, 1});
     levels.back().AddWall({3, 3});
     levels.back().AddWall({1, 3});
-    levels.back().AddEnemy("Skelet1", {3, 3, 5, 4, 4}, {3, 0});
+    levels.back().AddEnemy("Minotaur 1", {5, 3, 7, 7, 2}, {4, 1});
 
+    levels.push_back(Level(adventurer, 4));
+    levels.back().AddWall({1, 1});
+    levels.back().AddWall({1, 2});
+    levels.back().AddWall({4, 2});
+    levels.back().AddEnemy("Dragon 1", {5, 4, 5, 5, 5}, {1, 0});
 
     auto currLevel = levels.begin();
     while(currLevel->GetHero().GetStats().health > 0)
@@ -762,6 +800,11 @@ int main() {
         {
             if(currLevel != levels.end())
             {
+                log("Upgrade hero?", colorCode::green);
+                log("Select h(raise health to 6) or m/a/d/r (to buff stat)");
+                char buff;
+                std::cin >> buff;
+                currLevel->GetHero().Buff(buff);
                 currLevel = std::next(currLevel);
             }
             else
