@@ -69,7 +69,7 @@ enum class colorCode
     normal = 9
 };
 
-constexpr int DELAY = 100;
+const int DELAY = 100;
 void wait(int delayTime)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(delayTime));
@@ -95,6 +95,11 @@ void log(std::string message = "", std::string divider = "\n",
          colorCode fontColor = colorCode::black)
 {
     log<std::string>(message, divider, fontColor);
+}
+void log(int message, std::string divider = "\n",
+         colorCode fontColor = colorCode::black)
+{
+    log<int>(message, divider, fontColor);
 }
 void clearScrean()
 {
@@ -914,12 +919,12 @@ int main() {
     Hero adventurer("Viktor");
     std::vector<Level> levels;
 
-//    levels.push_back(Level(adventurer, 1));
-//    levels.back().AddWall({1, 3});
-//    levels.back().AddWall({3, 3});
-//    levels.back().AddWall({3, 1});
-//    levels.back().AddEnemy(monster::spider, {0, 3});
-//    levels.back().AddEnemy(monster::spider, {2, 4});
+   levels.push_back(Level(adventurer, 1));
+   levels.back().AddWall({1, 3});
+   levels.back().AddWall({3, 3});
+   levels.back().AddWall({3, 1});
+   levels.back().AddEnemy(monster::spider, {0, 3});
+   levels.back().AddEnemy(monster::spider, {2, 4});
     adventurer.SetStat('h', 5);
     adventurer.Buff('a');
 
