@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -7,8 +8,6 @@
 #include <windows.h>
 #endif
 
-// Enable ANSI escape codes on Windows 10+
-// On Linux/macOS, this does nothing
 void enableAnsiColors() {
 #ifdef _WIN32
     // Get the console handle
@@ -23,7 +22,6 @@ void enableAnsiColors() {
     SetConsoleMode(hOut, dwMode);
 #endif
 }
-
 int OS() {
 #if defined(_WIN32)
     std::cout << "Running on Windows (32-bit or 64-bit)\n";
@@ -143,9 +141,9 @@ struct coord
         if(y) pos.y = y/abs(y);
         return pos;
     }
-    double distance(coord to = coord(0,0))
+    double distance(coord to = coord(0,0)) const
     {
-        coord radius(to - coord(x, y));
+        coord radius(*this - to);
         return sqrt(radius.x*radius.x + radius.y*radius.y);
     }
     bool isAdjacent(coord to, int atthackRange = 2)
@@ -170,6 +168,18 @@ struct coord
     {
         x -= other.x;
         y -= other.y;
+    }
+    bool operator< (const coord& other) const
+    {
+        return (distance() < other.distance());
+    }
+    bool operator<= (const coord& other) const
+    {
+        return (distance() <= other.distance());
+    }
+    bool operator== (const coord& other) const
+    {
+        return (x==other.x && y==other.y);
     }
     friend std::ostream& operator<< (std::ostream& os, coord pos)
     {
@@ -196,28 +206,42 @@ public:
     }
     void AddWall(coord pos)
     {
-        grid.at(pos.y).at(pos.x) = cell::wall;
+        grid.at(pos.x).at(pos.y) = cell::wall;
     }
     void SetCell(coord pos, cell type)
     {
-        grid.at(pos.y).at(pos.x) = type;
+        grid.at(pos.x).at(pos.y) = type;
     }
     cell GetCell(coord pos)
     {
-        return grid.at(pos.y).at(pos.x);
+        return grid.at(pos.x).at(pos.y);
     }
-    bool isFree(coord pos)
+    bool isFree(coord pos) const
     {
-        return grid.at(pos.y).at(pos.x) == cell::empty;
+        if(pos.x < 0 || pos.x >= MAX_ROW)
+            return false;
+        if(pos.y < 0 || pos.y >= MAX_COL)
+            return false;
+        return grid.at(pos.x).at(pos.y) == cell::empty;
     }
     void Print(colorCode color = colorCode::normal) const
     {
         std::stringstream ss;
+        int enemyID = 0;
         for(auto &row : grid)
         {
             for(auto &el : row)
             {
-                ss << '|' << CellToDraw(el);
+                ss << '|';
+                if(el == cell::enemy)
+                {
+                    ss << enemyID;
+                    enemyID++;
+                }
+                else
+                {
+                    ss << CellToDraw(el);
+                }
             }
             ss << "|\n";
         }
@@ -228,8 +252,8 @@ public:
         if(to.x >= 0 && to.x < MAX_ROW &&
             to.y >= 0 && to.y < MAX_COL)
         {
-            std::swap(grid.at(from.y).at(from.x),
-                      grid.at(to.y).at(to.x));
+            std::swap(grid.at(from.x).at(from.y),
+                      grid.at(to.x).at(to.y));
             return true;
         }
         return false;
@@ -297,24 +321,25 @@ public:
     {
         stats = newStat;
     }
-    void Buff(char type)
+    void SetStat(char type, int val)
     {
         switch (type) {
+        case 'h':
+            stats.health = val;
+            break;
         case 'm':
-            stats.move++;
+            stats.move = val;
             break;
         case 'a':
-            stats.attack++;
+            stats.attack = val;
             break;
         case 'd':
-            stats.defence++;
+            stats.defence = val;
             break;
         case 'r':
-            stats.range++;
+            stats.range = val;
             break;
-        case 'h':
         default:
-            stats.health = 6;
             break;
         }
     }
@@ -344,16 +369,16 @@ public:
         }
 
         switch (int(d)) {
-        case int(direction::left):      pos.x--;
-        case int(direction::right):     pos.x++;
-        case int(direction::up):        pos.y--;
-        case int(direction::down):      pos.y++;
+        case int(direction::left):      pos.y--;
+        case int(direction::right):     pos.y++;
+        case int(direction::up):        pos.x--;
+        case int(direction::down):      pos.x++;
             stats.move -= 2;
             break;
-        case int(direction::leftUp):    pos.x--; pos.y--;
-        case int(direction::leftDown):  pos.x--; pos.y++;
-        case int(direction::rightUp):   pos.x++; pos.y--;
-        case int(direction::rightDown): pos.x++; pos.y++;
+        case int(direction::leftUp):    pos.y--; pos.x--;
+        case int(direction::leftDown):  pos.y--; pos.x++;
+        case int(direction::rightUp):   pos.y++; pos.x--;
+        case int(direction::rightDown): pos.y++; pos.x++;
             stats.move -= 3;
             break;
         }
@@ -377,11 +402,10 @@ public:
             log(">> Smashed <<", colorCode::blue);
             break;
         default:
-            if(stats.health <= 0)
-                log("## " + name+" is dead ##", colorCode::red);
-            else
-                log("** Lethaly wounded **", colorCode::red);
+            log("** Lethaly wounded **", colorCode::red);
             break;
+        if(stats.health <= 0)
+            log("## " + name+" is dead ##", colorCode::red);
         }
     }
     void Print() const
@@ -395,6 +419,58 @@ protected:
     Stats stats;
 };
 
+bool lineOfSight(const Field& field, coord from, coord to, int range)
+{
+    coord step = to - from;
+
+    // in range
+    if(step.distance() <= range * 0.5)
+    {
+        if(step.distance() == 1)
+            return true;
+
+        bool sight = true;
+        if(step.x == 0)
+        {
+            for(int i = 1; i < step.y; i++)
+            {
+                if(!field.isFree({from.x, from.y+i}))
+                {
+                        sight = false;
+                }
+            }
+        }
+        if(step.y == 0)
+        {
+            for(int i = 1; i < step.x; i++)
+            {
+                if(!field.isFree({from.x+i, from.y}))
+                {
+                        sight = false;
+                }
+            }
+        }
+        if(step.x == step.y && step.distance() )
+        {
+            for(int i = 1; i < step.x; i++)
+            {
+                if(!field.isFree({from.x+i, from.y+i}))
+                {
+                        sight = false;
+                }
+            }
+        }
+        return sight;
+    }
+    return false;
+}
+enum class monster
+{
+    spider,
+    skeletonArcher,
+    minotaur,
+    dragon
+};
 class Monster : public Character
 {
 public:
@@ -404,50 +480,43 @@ public:
         this->stats = stats;
         this->pos = pos;
     }
+    Monster(monster type, coord pos)
+    {
+        switch (type) {
+        case monster::spider:
+            name = "Spider";
+            stats = {2, 5, 4, 4, 2};
+            break;
+        case monster::skeletonArcher:
+            name = "Skeleton";
+            stats = {3, 4, 5, 4, 4};
+            break;
+        case monster::minotaur:
+            name = "Minotaur";
+            stats = {5, 3, 7, 7, 2};
+            break;
+        case monster::dragon:
+            name = "Dragon";
+            stats = {5, 5, 5, 5, 5};
+            break;
+        default:
+            break;
+        }
+        this->stats = stats;
+        this->pos = pos;
+    }
     void Move(coord to, Field& field)
     {
         int speed = stats.move;
         while(speed > 1)
         {
-
             coord step = to - pos;
 
             // adjacent
-            if(step.distance() <= stats.range * 0.5)
+            if(step.distance() <= stats.range * 0.5
+                && lineOfSight(field, pos, to, stats.range))
             {
-                // line of sight
-                bool sight = true;
-                if(step.x == 0)
-                {
-                    for(int i = 0; i < step.y; i++)
-                    {
-                        if(!field.isFree({pos.x, pos.y+i}))
-                        {
-                            sight = false;
-                        }
-                    }
-                }
-                if(step.y == 0)
-                {
-                    for(int i = 0; i < step.x; i++)
-                    {
-                        if(!field.isFree({pos.x+i, pos.y}))
-                        {
-                            sight = false;
-                        }
-                    }
-                }
-                if(step.x == step.y)
-                {
-                    for(int i = 0; i < step.x; i++)
-                    {
-                        if(!field.isFree({pos.x+i, pos.y+i}))
-                        {
-                            sight = false;
-                        }
-                    }
-                }
-                if(sight) return;
+                return;
             }
 
             if(step.x != 0 && step.y != 0
@@ -460,35 +529,44 @@ public:
             }
             else if((step.x != 0 || step.y != 0))
             {
-                //priority horizontal movement
+                //priority vertical movement
                 if(step.x != 0 && field.isFree(pos + coord(step.direction().x, 0)))
                 {
-                    log("\tMonster move horizontal");
+                    log("\tMonster move vertical");
                     pos.x += step.direction().x;
                     step.x -= step.direction().x;
                     speed -= 2;
                 }
                 else if(step.y != 0 && field.isFree(pos + coord(0, step.direction().y)) && speed > 1)
                 {
-                    log("\tMonster move vertical");
+                    log("\tMonster move horizontal");
                     pos.y += step.direction().y;
                     step.y -= step.direction().y;
                     speed -= 2;
                 }
                 else
                 {
+                    // TO DO !
                     log("\tMonster don't know");
-                    if(step.x > step.y)
-                        step.y = 0;
-                    else
-                        step.x = 0;
-
-                    int random = rng(2);
-                    if(random)
+                    std::vector<coord> adj;
+                    for(int i = pos.x-1; i <= pos.x+1; i++)
+                        for(int j = pos.y-1; j <= pos.y+1; j++)
+                            if(field.isFree({i, j}))
+                                adj.push_back({i, j});
+                    std::sort(adj.begin(), adj.end());
+                    int count = 0;
+                    for(auto &p : adj)
                     {
-
+                        if(p.distance(to) == adj.front().distance(to))
+                            count++;
                     }
-                    return;
+                    int index = rng(count);
+
+                    if(adj.at(index).distance() > 1)
+                        speed -= 3;
+                    else
+                        speed -= 2;
+                    pos = adj.at(index);
                 }
             }
             else
@@ -511,6 +589,27 @@ public:
 //        baseStats = Stats(6, 1, 1, 1, 2);
     }
 
+    void Buff(char type)
+    {
+        switch (type) {
+        case 'm':
+            baseStats.move++;
+            break;
+        case 'a':
+            baseStats.attack++;
+            break;
+        case 'd':
+            baseStats.defence++;
+            break;
+        case 'r':
+            baseStats.range++;
+            break;
+        case 'h':
+        default:
+            baseStats.health = 6;
+            break;
+        }
+    }
     void ResetStatsToBase()
     {
         int currHP = stats.health;
@@ -566,7 +665,6 @@ public:
         log();
         PrintStats();
     }
-
     void Move(Field& f)
     {
         while (stats.move > 1)
@@ -579,47 +677,47 @@ public:
             std::cin >> key;
             switch (key) {
             case '1':
-                pos.x--;
-                pos.y++;
+                pos.y--;
+                pos.x++;
                 stats.move -= 3;
                 break;
             case 's':
             case 'S':
             case '2':
-                pos.y++;
+                pos.x++;
                 stats.move -= 2;
                 break;
             case '3':
-                pos.x++;
                 pos.y++;
+                pos.x++;
                 stats.move -= 3;
                 break;
             case 'a':
             case 'A':
             case '4':
-                pos.x--;
+                pos.y--;
                 stats.move -= 2;
                 break;
             case 'd':
             case 'D':
             case '6':
-                pos.x++;
+                pos.y++;
                 stats.move -= 2;
                 break;
             case '7':
-                pos.x--;
                 pos.y--;
+                pos.x--;
                 stats.move -= 3;
                 break;
             case 'w':
             case 'W':
             case '8':
-                pos.y--;
+                pos.x--;
                 stats.move -= 2;
                 break;
             case '9':
-                pos.x++;
-                pos.y--;
+                pos.y++;
+                pos.x--;
                 stats.move -= 3;
                 break;
             default:
@@ -711,7 +809,7 @@ public:
         log("LEVEL " + std::to_string(id) + " create.", colorCode::green);
         color = colorCode(id);
 
-        coord begin(number%2 ? 0 : MAX_COL-1, MAX_ROW-1);
+        coord begin(MAX_ROW-1, number%2 ? 0 : MAX_COL-1);
         field.SetCell(begin, cell::hero);
         hero = myHero;
         hero.SetPosition(begin);
@@ -728,6 +826,7 @@ public:
         hero.RollDice();
         hero.Move(field);
         hero.Attack(enemies, field);
+        hero.Move(field);
     }
     bool EnemiesTurn()
     {
@@ -742,7 +841,8 @@ public:
         int attackDamage = 0;
         for(auto &monster : enemies)
         {
-            if(monster.GetPos().isAdjacent(hero.GetPos(), monster.GetStats().range))
+            if(monster.GetPos().isAdjacent(hero.GetPos(), monster.GetStats().range)
+                && lineOfSight(field, monster.GetPos(), hero.GetPos(), monster.GetStats().range))
             {
                 attackDamage += monster.GetStats().attack;
                 log(monster.GetName() + " attack");
@@ -771,11 +871,17 @@ public:
         field.SetCell(pos, cell::enemy);
         enemies.push_back(Monster(name, stats, pos));
     }
+    void AddEnemy(monster type, coord pos)
+    {
+        field.SetCell(pos, cell::enemy);
+        enemies.push_back(Monster(type, pos));
+    }
     void PrintEnemies() const
     {
-        for(auto &i : enemies)
+        for(int id = 0; id < enemies.size(); id++)
         {
-            i.Print();
+            log(id, " ");
+            enemies.at(id).Print();
         }
     }
     bool isClear() const
@@ -807,31 +913,34 @@ int main() {
 
     Hero adventurer("Viktor");
     std::vector<Level> levels;
-    levels.push_back(Level(adventurer, 1));
-    levels.back().AddWall({1, 3});
-    levels.back().AddWall({3, 3});
-    levels.back().AddWall({3, 1});
-    levels.back().AddEnemy("Spider 1", {2, 5, 4, 4, 2}, {3, 0});
-    levels.back().AddEnemy("Spider 2", {2, 5, 4, 4, 2}, {4, 2});
+
+//    levels.push_back(Level(adventurer, 1));
+//    levels.back().AddWall({1, 3});
+//    levels.back().AddWall({3, 3});
+//    levels.back().AddWall({3, 1});
+//    levels.back().AddEnemy(monster::spider, {0, 3});
+//    levels.back().AddEnemy(monster::spider, {2, 4});
+    adventurer.SetStat('h', 5);
+    adventurer.Buff('a');
 
     levels.push_back(Level(adventurer, 2));
-    levels.back().AddWall({3, 2});
+    levels.back().AddWall({2, 3});
     levels.back().AddWall({3, 3});
-    levels.back().AddWall({0, 2});
-    levels.back().AddEnemy("Skelet archer 1", {3, 4, 5, 4, 4}, {0, 1});
-    levels.back().AddEnemy("Skelet archer 2", {3, 4, 5, 4, 4}, {2, 0});
+    levels.back().AddWall({3, 0});
+    levels.back().AddEnemy(monster::skeletonArcher, {1, 0});
+    levels.back().AddEnemy(monster::skeletonArcher, {0, 2});
 
     levels.push_back(Level(adventurer, 3));
     levels.back().AddWall({3, 1});
     levels.back().AddWall({1, 1});
     levels.back().AddWall({1, 3});
-    levels.back().AddEnemy("Minotaur 1", {5, 3, 7, 7, 2}, {4, 1});
+    levels.back().AddEnemy(monster::minotaur, {1, 4});
 
     levels.push_back(Level(adventurer, 4));
     levels.back().AddWall({1, 1});
-    levels.back().AddWall({1, 2});
-    levels.back().AddWall({4, 2});
-    levels.back().AddEnemy("Dragon 1", {5, 5, 5, 5, 5}, {1, 0});
+    levels.back().AddWall({2, 1});
+    levels.back().AddWall({2, 4});
+    levels.back().AddEnemy(monster::dragon, {0, 1});
 
     log();
     auto currLevel = levels.begin();
@@ -850,6 +959,7 @@ int main() {
                 std::cin >> buff;
                 currLevel->GetHero().Buff(buff);
                 currLevel = std::next(currLevel);
+                break;
             }
             else
             {
@@ -861,6 +971,7 @@ int main() {
         if(currLevel->EnemiesTurn())
         {
             log(".. You lost! ..", colorCode::red);
+            currLevel->GetHero().Print();
             break;
         }
         clearScrean();
