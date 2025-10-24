@@ -3,6 +3,48 @@
 #include <sstream>
 #include <iostream>
 #include <thread>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// Enable ANSI escape codes on Windows 10+
+// On Linux/macOS, this does nothing
+void enableAnsiColors() {
+#ifdef _WIN32
+    // Get the console handle
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut == INVALID_HANDLE_VALUE) return;
+
+    DWORD dwMode = 0;
+    if (!GetConsoleMode(hOut, &dwMode)) return;
+
+    // Enable ANSI escape sequences
+    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    SetConsoleMode(hOut, dwMode);
+#endif
+}
+
+int OS() {
+#if defined(_WIN32)
+    std::cout << "Running on Windows (32-bit or 64-bit)\n";
+    return 1;
+#elif defined(__APPLE__)
+    std::cout << "Running on macOS\n";
+    return 2;
+#elif defined(__linux__)
+    std::cout << "Running on Linux\n";
+    return 3;
+#elif defined(__unix__)
+    std::cout << "Running on a Unix-like system\n";
+    return 4;
+#elif defined(__ANDROID__)
+    std::cout << "Running on Android\n";
+    return 5;
+#else
+    std::cout << "Unknown operating system\n";
+    return 0;
+#endif
+}
 
 int rng(int range)
 {
@@ -40,8 +82,7 @@ void log(T message, std::string divider = "\n",
          colorCode backgroudColor = colorCode::normal,
          int delayTime = DELAY)
 {
-    std::cout
-        << "\e[3" + std::to_string(int(fontColor)) + "m"
+    std::cout << "\e[3" + std::to_string(int(fontColor)) + "m"
               << "\e[10" + std::to_string(int(backgroudColor)) + "m"
               << message << divider << "\e[49m";
     wait(delayTime);
@@ -667,16 +708,19 @@ class Level
 public:
     Level(Hero& myHero, int number): id(number)
     {
-        log("LEVEL " + std::to_string(number), colorCode::green);
+        log("LEVEL " + std::to_string(id) + " create.", colorCode::green);
         color = colorCode(id);
 
-        coord begin(0, MAX_ROW-1);
+        coord begin(number%2 ? 0 : MAX_COL-1, MAX_ROW-1);
         field.SetCell(begin, cell::hero);
         hero = myHero;
         hero.SetPosition(begin);
-        hero.Print();
     }
-
+    void Print() const
+    {
+        log("LEVEL " + std::to_string(id) + " ready!", colorCode::green);
+        field.Print(color);
+    }
     void HeroTurn()
     {
         log("Hero turn!", colorCode::cyan);
@@ -758,29 +802,28 @@ private:
 };
 
 int main() {
+    enableAnsiColors();
+    OS();
 
     Hero adventurer("Viktor");
-    adventurer.Buff('r');
-    adventurer.Buff('r');
-    adventurer.Buff('r');
     std::vector<Level> levels;
     levels.push_back(Level(adventurer, 1));
-    levels.back().AddWall({1, 1});
+    levels.back().AddWall({1, 3});
     levels.back().AddWall({3, 3});
     levels.back().AddWall({3, 1});
-    levels.back().AddEnemy("Spider 1", {2, 4, 4, 4, 2}, {3, 0});
-    levels.back().AddEnemy("Spider 2", {2, 4, 4, 4, 2}, {4, 3});
+    levels.back().AddEnemy("Spider 1", {2, 5, 4, 4, 2}, {3, 0});
+    levels.back().AddEnemy("Spider 2", {2, 5, 4, 4, 2}, {4, 2});
 
     levels.push_back(Level(adventurer, 2));
-    levels.back().AddWall({3, 1});
     levels.back().AddWall({3, 2});
+    levels.back().AddWall({3, 3});
     levels.back().AddWall({0, 2});
-    levels.back().AddEnemy("Skelet archer 1", {3, 4, 5, 4, 4}, {4, 3});
-    levels.back().AddEnemy("Skelet archer 2", {3, 4, 5, 4, 4}, {1, 0});
+    levels.back().AddEnemy("Skelet archer 1", {3, 4, 5, 4, 4}, {0, 1});
+    levels.back().AddEnemy("Skelet archer 2", {3, 4, 5, 4, 4}, {2, 0});
 
     levels.push_back(Level(adventurer, 3));
+    levels.back().AddWall({3, 1});
     levels.back().AddWall({1, 1});
-    levels.back().AddWall({3, 3});
     levels.back().AddWall({1, 3});
     levels.back().AddEnemy("Minotaur 1", {5, 3, 7, 7, 2}, {4, 1});
 
@@ -788,12 +831,13 @@ int main() {
     levels.back().AddWall({1, 1});
     levels.back().AddWall({1, 2});
     levels.back().AddWall({4, 2});
-    levels.back().AddEnemy("Dragon 1", {5, 4, 5, 5, 5}, {1, 0});
+    levels.back().AddEnemy("Dragon 1", {5, 5, 5, 5, 5}, {1, 0});
 
+    log();
     auto currLevel = levels.begin();
     while(currLevel->GetHero().GetStats().health > 0)
     {
-        currLevel->GetField().Print(currLevel->GetColor());
+        currLevel->Print();
         currLevel->PrintEnemies();
         currLevel->HeroTurn();
         if(currLevel->isClear())
@@ -819,7 +863,6 @@ int main() {
             log(".. You lost! ..", colorCode::red);
             break;
         }
-        wait(20*DELAY);
         clearScrean();
     }
 
