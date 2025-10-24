@@ -964,7 +964,7 @@ int main() {
                 std::cin >> buff;
                 currLevel->GetHero().Buff(buff);
                 currLevel = std::next(currLevel);
-                break;
+                continue;
             }
             else
             {
@@ -977,7 +977,7 @@ int main() {
         {
             log(".. You lost! ..", colorCode::red);
             currLevel->GetHero().Print();
-            break;
+            continue;
         }
         clearScrean();
     }
